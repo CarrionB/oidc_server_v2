@@ -15,8 +15,8 @@ const oidc = new Provider("http://localhost:3000", {
     {
       client_id: "foo",
       client_secret: "bar",
-      redirect_uris: ["https://jwt.io", "https://openidconnect.net/callback"], // using jwt.io as redirect_uri to show the ID Token contents
-      response_types: ["id_token", "code"],
+      redirect_uris: ["https://jwt.io", "https://openidconnect.net/callback", "https://oauth.pstmn.io/v1/callback"], // using jwt.io as redirect_uri to show the ID Token contents
+      response_types: ["id_token", "code", "code id_token"],
       grant_types: ['implicit', 'authorization_code', 'refresh_token'],
       application_type: "web"
     },
@@ -48,7 +48,46 @@ const oidc = new Provider("http://localhost:3000", {
   },
   scopes: ["openid", "offline_access"],
   ttl:{
-    Interaction: 3600
+    AccessToken: function AccessTokenTTL(ctx, token, client) {
+      if (token.resourceServer) {
+        return token.resourceServer.accessTokenTTL || 60 * 60; // 1 hour in seconds
+      }
+      return 60 * 60; // 1 hour in seconds
+    },
+    AuthorizationCode: 600 /* 10 minutes in seconds */,
+    BackchannelAuthenticationRequest: function BackchannelAuthenticationRequestTTL(ctx, request, client) {
+      if(ctx.oidc.params){
+        if (ctx && ctx.oidc && ctx.oidc.params.requested_expiry) {
+          return Math.min(10 * 60, + (ctx.oidc.params.requested_expiry as Number)); // 10 minutes in seconds or requested_expiry, whichever is shorter
+        }
+      }
+    
+      return 10 * 60; // 10 minutes in seconds
+    },
+    ClientCredentials: function ClientCredentialsTTL(ctx, token, client) {
+      if (token.resourceServer) {
+        return token.resourceServer.accessTokenTTL || 10 * 60; // 10 minutes in seconds
+      }
+      return 10 * 60; // 10 minutes in seconds
+    },
+    DeviceCode: 600 /* 10 minutes in seconds */,
+    Grant: 1209600 /* 14 days in seconds */,
+    IdToken: 3600 /* 1 hour in seconds */,
+    Interaction: 3600 /* 1 hour in seconds */,
+    RefreshToken: function RefreshTokenTTL(ctx, token, client) {
+      if (
+        ctx && ctx.oidc.entities.RotatedRefreshToken
+        && client.applicationType === 'web'
+        && client.tokenEndpointAuthMethod === 'none'
+        && !token.isSenderConstrained()
+      ) {
+        // Non-Sender Constrained SPA RefreshTokens do not have infinite expiration through rotation
+        return ctx.oidc.entities.RotatedRefreshToken.remainingTTL;
+      }
+    
+      return 14 * 24 * 60 * 60; // 14 days in seconds
+    },
+    Session: 1209600
   },
   async findAccount(ctx: any, id:string, token: any) {
     console.log(token)
@@ -57,7 +96,25 @@ const oidc = new Provider("http://localhost:3000", {
       accountId: id,
       async claims(use, scope) { return { sub: id, scope }; },
     };
-  }
+  },
+  // async issueRefreshToken(ctx, client, code) {
+  //   console.log("issueRefreshToken")
+  //   console.log("code => ", code.scopes)
+  //   return client.grantTypeAllowed('refresh_token') && code.scopes.has('offline_access');
+  // },
+  async issueRefreshToken(ctx, client, code) {
+    if (!client.grantTypeAllowed('refresh_token')) {
+      return false;
+    }
+    return code.scopes.has('offline_access') || (client.applicationType === 'web' && client.tokenEndpointAuthMethod === 'none');
+  },
+  tokenEndpointAuthMethods: [
+    'client_secret_basic',
+    'client_secret_jwt',
+    'client_secret_post',
+    'private_key_jwt',
+    'none'
+  ]
 });
 
 // http://localhost:3000/auth?response_type=id_token&client_id=foo&redirect_uri=https%3A%2F%2Fjwt.io&nonce=test&scope=openid
@@ -98,10 +155,7 @@ app.get("/interaction/:uid", setNoCache, async (req, res, next) => {
       client,
       uid,
       details: prompt.details,
-      params:{
-        ...params,
-        scope: params.scope + " offline_access"
-      },
+      params,
       title: "Authorize",
     });
   } catch (err) {

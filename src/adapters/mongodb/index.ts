@@ -69,8 +69,6 @@ class MongoAdapter {
       ({ payload: 1 } as any),
     ).limit(1).next();
 
-    console.log("find =>", result)
-
     if (!result) return undefined;
     return result.payload;
   }
@@ -81,8 +79,6 @@ class MongoAdapter {
       ({ payload: 1 } as any),
     ).limit(1).next();
 
-    console.log("findByUserCode =>", result)
-
     if (!result) return undefined;
     return result.payload;
   }
@@ -92,8 +88,6 @@ class MongoAdapter {
       { 'payload.uid': uid },
       ({ payload: 1 } as any),
     ).limit(1).next();
-
-    console.log("findByUid =>", result)
 
     if (!result) return undefined;
     return result.payload;
@@ -122,9 +116,6 @@ class MongoAdapter {
     const result = await MongoAdapter.coll("users_data").find(
       { email: email, password: password},
     ).limit(1).next();
-
-    console.log("Credentials =>", email, password)
-    console.log("find login =>", result)
 
     if (!result) return undefined;
     return result;
